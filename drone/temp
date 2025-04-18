@@ -1,1 +1,186 @@
-a
+import streamlit as st
+import plotly.graph_objects as go
+import plotly.express as px
+import pandas as pd
+import random
+import time
+import math
+from datetime import datetime
+
+# Streamlit page configuration
+st.set_page_config(page_title="Drone Telemetry Dashboard", layout="wide")
+
+# Initialize session state for telemetry data history
+if 'altitude_history' not in st.session_state:
+    st.session_state.altitude_history = []
+if 'timestamps' not in st.session_state:
+    st.session_state.timestamps = []
+
+# Drone Telemetry Simulation Class
+class DroneTelemetry:
+    def __init__(self):
+        self.battery = 12.0
+        self.roll = 0.0
+        self.pitch = 0.0
+        self.yaw = 0.0
+        self.temperature = 25.0
+        self.altitude = 100.0
+        self.latitude = 37.7749
+        self.longitude = -122.4194
+        self.connection = "Excellent"
+        self.last_update = time.time()
+
+    def update(self):
+        current_time = time.time()
+        dt = current_time - self.last_update
+
+        # Simulate battery drain
+        self.battery = max(0, self.battery - random.uniform(0.01, 0.05) * dt)
+
+        # Simulate IMU data
+        self.roll = math.sin(current_time * 0.1) * 15 + random.uniform(-2, 2)
+        self.pitch = math.cos(current_time * 0.1) * 15 + random.uniform(-2, 2)
+        self.yaw = (self.yaw + random.uniform(-5, 5)) % 360
+
+        # Simulate other sensors
+        self.temperature = 25 + random.uniform(-1, 1) * dt
+        self.altitude = max(0, 100 + math.sin(current_time * 0.05) * 20 + random.uniform(-5, 5))
+
+        # Simulate GPS movement
+        self.latitude += random.uniform(-0.0001, 0.0001) * dt
+        self.longitude += random.uniform(-0.0001, 0.0001) * dt
+
+        # Simulate connection health
+        connection_levels = ["Excellent", "Good", "Poor", "No Signal"]
+        if random.random() < 0.05 * dt:
+            self.connection = random.choice(connection_levels)
+
+        self.last_update = current_time
+
+        return {
+            "battery": round(self.battery, 2),
+            "roll": round(self.roll, 2),
+            "pitch": round(self.pitch, 2),
+            "yaw": round(self.yaw, 2),
+            "temperature": round(self.temperature, 2),
+            "altitude": round(self.altitude, 2),
+            "latitude": round(self.latitude, 6),
+            "longitude": round(self.longitude, 6),
+            "connection": self.connection,
+            "timestamp": current_time
+        }
+
+# Initialize drone telemetry
+drone = DroneTelemetry()
+
+# Function to create a gauge
+def create_gauge(value, max_value, title, unit="", colors=["#FF5733", "#FFC107", "#00FF00"]):
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=value,
+        domain={'x': [0, 1], 'y': [0, 1]},
+        title={'text': title},
+        gauge={
+            'axis': {'range': [0, max_value]},
+            'bar': {'color': colors[1]},
+            'steps': [
+                {'range': [0, max_value * 0.33], 'color': colors[0]},
+                {'range': [max_value * 0.33, max_value * 0.66], 'color': colors[1]},
+                {'range': [max_value * 0.66, max_value], 'color': colors[2]}
+            ]
+        },
+        number={'suffix': unit}
+    ))
+    fig.update_layout(height=200)
+    return fig
+
+# Main dashboard loop
+def main():
+    st.title("Drone Telemetry Dashboard")
+
+    # Create placeholders for dynamic updates
+    battery_col, connection_col, temp_col = st.columns(3)
+    imu_col1, imu_col2, imu_col3 = st.columns(3)
+    altitude_col, gps_col = st.columns([2, 1])
+
+    battery_placeholder = battery_col.empty()
+    connection_placeholder = connection_col.empty()
+    temp_placeholder = temp_col.empty()
+    roll_placeholder = imu_col1.empty()
+    pitch_placeholder = imu_col2.empty()
+    yaw_placeholder = imu_col3.empty()
+    altitude_placeholder = altitude_col.empty()
+    gps_placeholder = gps_col.empty()
+
+    while True:
+        # Get updated telemetry
+        data = drone.update()
+
+        # Update battery gauge
+        battery_fig = create_gauge(data["battery"], 12, "Battery Voltage", "V")
+        battery_placeholder.plotly_chart(battery_fig, use_container_width=True)
+
+        # Update connection status
+        connection_color = {
+            "Excellent": "green",
+            "Good": "yellow",
+            "Poor": "orange",
+            "No Signal": "red"
+        }.get(data["connection"], "gray")
+        connection_placeholder.markdown(
+            f"<h3 style='text-align: center;'>Connection Status</h3>"
+            f"<p style='text-align: center; color: {connection_color}; font-size: 24px;'>{data['connection']}</p>",
+            unsafe_allow_html=True
+        )
+
+        # Update temperature
+        temp_placeholder.markdown(
+            f"<h3 style='text-align: center;'>Temperature</h3>"
+            f"<p style='text-align: center; font-size: 24px;'>{data['temperature']}°C</p>",
+            unsafe_allow_html=True
+        )
+
+        # Update IMU gauges
+        roll_fig = create_gauge(data["roll"] + 30, 60, "Roll", "°", ["#FF0000", "#FFA500", "#00FF00"])
+        pitch_fig = create_gauge(data["pitch"] + 30, 60, "Pitch", "°", ["#FF0000", "#FFA500", "#00FF00"])
+        yaw_fig = create_gauge(data["yaw"], 360, "Yaw", "°", ["#FF0000", "#FFA500", "#00FF00"])
+        roll_placeholder.plotly_chart(roll_fig, use_container_width=True)
+        pitch_placeholder.plotly_chart(pitch_fig, use_container_width=True)
+        yaw_placeholder.plotly_chart(yaw_fig, use_container_width=True)
+
+        # Update altitude chart
+        st.session_state.altitude_history.append(data["altitude"])
+        st.session_state.timestamps.append(datetime.fromtimestamp(data["timestamp"]).strftime("%H:%M:%S"))
+        if len(st.session_state.altitude_history) > 20:
+            st.session_state.altitude_history.pop(0)
+            st.session_state.timestamps.pop(0)
+
+        altitude_df = pd.DataFrame({
+            "Time": st.session_state.timestamps,
+            "Altitude": st.session_state.altitude_history
+        })
+        altitude_fig = px.line(altitude_df, x="Time", y="Altitude", title="Altitude (m)")
+        altitude_fig.update_layout(showlegend=False)
+        altitude_placeholder.plotly_chart(altitude_fig, use_container_width=True)
+
+        # Update GPS map
+        gps_df = pd.DataFrame({
+            "lat": [data["latitude"]],
+            "lon": [data["longitude"]]
+        })
+        gps_fig = px.scatter_mapbox(gps_df, lat="lat", lon="lon", zoom=15, height=300)
+        gps_fig.update_layout(mapbox_style="open-street-map", margin={"r": 0, "t": 0, "l": 0, "b": 0})
+        gps_fig.update_traces(marker=dict(size=15, color="red"))
+        gps_placeholder.plotly_chart(gps_fig, use_container_width=True)
+
+        # Display GPS coordinates below the map
+        gps_placeholder.markdown(
+            f"**Latitude**: {data['latitude']}<br>**Longitude**: {data['longitude']}",
+            unsafe_allow_html=True
+        )
+
+        # Delay for real-time effect
+        time.sleep(1)
+
+if __name__ == "__main__":
+    main()
